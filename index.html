@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gusano Alfa</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        body {
+            background-color: #000; color: #fff; font-family: 'Press Start 2P', cursive;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100vh; margin: 0;
+        }
+        .game-wrapper {
+            border: 4px solid #fff; box-shadow: 0 0 20px #ffd700;
+        }
+        canvas { display: block; background-color: #111; }
+        .ui-container {
+            width: 800px; display: flex; justify-content: space-between;
+            font-size: 1.5em; margin-bottom: 15px;
+        }
+        #player-score { color: #00ffff; }
+        #enemy-score { color: #ff4136; }
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            text-align: center; transition: opacity 0.5s;
+        }
+        .hidden { opacity: 0; pointer-events: none; }
+        #overlay h1 { font-size: 4em; margin: 0; text-shadow: 3px 3px 8px #000;}
+        #overlay p { font-size: 1em; max-width: 600px; margin: 20px 0; line-height: 1.5; }
+        #overlay button {
+            font-family: 'Press Start 2P', cursive; font-size: 2em; padding: 15px 30px;
+            background-color: #fff; color: #000; border: none; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="ui-container">
+        <div id="player-score">TÚ: 5</div>
+        <div id="enemy-score">ROJO MÁS GRANDE: 5</div>
+    </div>
+    <div class="game-wrapper">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div id="overlay">
+            <h1 id="overlay-title">GUSANO ALFA</h1>
+            <p id="overlay-text">¡El gusano grande se come al chico!<br>Crece comiendo manzanas amarillas. Si eres más grande, come a los rojos.<br>Si un rojo es más grande que tú, ¡CORRE!</p>
+            <button id="start-button">EMPEZAR CAZA</button>
+        </div>
+    </div>
+    
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('overlay');
+        const overlayTitle = document.getElementById('overlay-title');
+        const overlayText = document.getElementById('overlay-text');
+        const startBtn = document.getElementById('start-button');
+        const playerScoreEl = document.getElementById('player-score');
+        const enemyScoreEl = document.getElementById('enemy-score');
+        
+        const TILE_SIZE = 20;
+        const GRID_WIDTH = canvas.width / TILE_SIZE;
+        const GRID_HEIGHT = canvas.height / TILE_SIZE;
+        const GAME_SPEED = 100;
+
+        let gameState = 'startMenu';
+        let player, enemies, food;
+        let gameLogicInterval;
+
+        function createSnake(x, y, color, direction, length) {
+            const body = [];
+            for(let i=0; i<length; i++) {
+                body.push({x: x-i, y});
+            }
+            return { body, color, direction };
+        }
+
+        function placeFood() {
+            let onSnake = true;
+            while(onSnake) {
+                food = { x: Math.floor(Math.random() * GRID_WIDTH), y: Math.floor(Math.random() * GRID_HEIGHT) };
+                const allSnakeParts = [...player.body, ...enemies.flatMap(e => e.body)];
+                onSnake = allSnakeParts.some(part => food.x === part.x && food.y === part.y);
+            }
+        }
+        
+        function spawnEnemies(count, size, x, y) {
+            for(let i=0; i<count; i++) {
+                 enemies.push(createSnake(
+                    Math.floor(x),
+                    Math.floor(y), 
+                    '#ff4136', 
+                    ['up', 'down', 'left', 'right'][Math.floor(Math.random()*4)], 
+                    size
+                ));
+            }
+        }
+
+        function init() {
+            player = createSnake(10, Math.floor(GRID_HEIGHT / 2), '#00ffff', 'right', 5);
+            enemies = [];
+            spawnEnemies(1, 5, GRID_WIDTH - 10, Math.floor(GRID_HEIGHT / 2));
+            placeFood();
+            gameState = 'playing';
+            overlay.classList.add('hidden');
+        }
+        
+        startBtn.addEventListener('click', init);
+
+        window.addEventListener('keydown', e => {
+            if (!player) return;
+            const currentDir = player.direction;
+            if (e.key === 'ArrowUp' && currentDir !== 'down') player.direction = 'up';
+            else if (e.key === 'ArrowDown' && currentDir !== 'up') player.direction = 'down';
+            else if (e.key === 'ArrowLeft' && currentDir !== 'right') player.direction = 'left';
+            else if (e.key === 'ArrowRight' && currentDir !== 'left') player.direction = 'right';
+        });
+
+        function isSafe(pos) {
+            if (pos.x < 0 || pos.x >= GRID_WIDTH || pos.y < 0 || pos.y >= GRID_HEIGHT) return false;
+            const allSnakeParts = [...(player ? player.body : []), ...enemies.flatMap(e => e.body)];
+            return !allSnakeParts.some(part => pos.x === part.x && pos.y === part.y);
+        }
+
+        function updateEnemyAI(enemy) {
+            const head = enemy.body[0];
+            const isBigger = enemy.body.length > player.body.length;
+            const target = isBigger ? player.body[0] : food;
+
+            const directions = ['up', 'down', 'left', 'right'];
+            let bestMove = enemy.direction;
+            let bestScore = -Infinity;
+
+            for (const dir of directions) {
+                let nextHead = { ...head };
+                if (dir === 'up') nextHead.y--; if (dir === 'down') nextHead.y++;
+                if (dir === 'left') nextHead.x--; if (dir === 'right') nextHead.x++;
+
+                if (isSafe(nextHead)) {
+                    let score = 0;
+                    const distToTarget = Math.hypot(nextHead.x - target.x, nextHead.y - target.y);
+                    score = isBigger ? -distToTarget : -distToTarget * 2; // Hunt or get food
+
+                    if (!isBigger) { // If smaller, add score for running away from player
+                        const distToPlayer = Math.hypot(nextHead.x - player.body[0].x, nextHead.y - player.body[0].y);
+                        score += distToPlayer;
+                    }
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestMove = dir;
+                    }
+                }
+            }
+            enemy.direction = bestMove;
+        }
+
+        function update() {
+            if (gameState !== 'playing') return;
+            
+            enemies.forEach(updateEnemyAI);
+            
+            const allSnakes = [player, ...enemies];
+            
+            for (let i = allSnakes.length - 1; i >= 0; i--) {
+                const snake = allSnakes[i];
+                const head = { ...snake.body[0] };
+                if (snake.direction === 'up') head.y--; if (snake.direction === 'down') head.y++;
+                if (snake.direction === 'left') head.x--; if (snake.direction === 'right') head.x++;
+                
+                // 1. Wall Collision
+                if (head.x < 0 || head.x >= GRID_WIDTH || head.y < 0 || head.y >= GRID_HEIGHT) {
+                    endGame(snake.color === player.color ? "¡PERDISTE!" : "¡GANASTE!", "El gusano chocó contra el muro.");
+                    return;
+                }
+
+                // 2. Self Collision
+                for(let j=1; j < snake.body.length; j++){
+                    if(head.x === snake.body[j].x && head.y === snake.body[j].y){
+                         endGame(snake.color === player.color ? "¡PERDISTE!" : "¡GANASTE!", "El gusano se comió a sí mismo.");
+                         return;
+                    }
+                }
+
+                // 3. Eating other snakes
+                let eaten = false;
+                for (let j = allSnakes.length - 1; j >= 0; j--) {
+                    if (i === j) continue;
+                    const otherSnake = allSnakes[j];
+                    if (snake.body.length > otherSnake.body.length) { // Can this snake eat the other one?
+                        for (const part of otherSnake.body) {
+                            if (head.x === part.x && head.y === part.y) {
+                                if (otherSnake === player) {
+                                    endGame("¡PERDISTE!", "Un gusano más grande te comió.");
+                                    return;
+                                } else {
+                                    const deadPos = {x: otherSnake.body[0].x, y: otherSnake.body[0].y};
+                                    snake.body.push(...otherSnake.body); // Grow by eating
+                                    enemies.splice(enemies.indexOf(otherSnake), 1);
+                                    spawnEnemies(2, Math.floor(otherSnake.body.length / 2) || 1, deadPos.x, deadPos.y);
+                                    eaten = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if(eaten) continue;
+
+                snake.body.unshift(head);
+                if (head.x === food.x && head.y === food.y) {
+                    placeFood();
+                } else {
+                    snake.body.pop();
+                }
+            }
+        }
+        
+        function endGame(title, reason) {
+            gameState = 'gameOver';
+            clearInterval(gameLogicInterval);
+            gameLogicInterval = null;
+            overlayTitle.innerHTML = title;
+            overlayText.textContent = reason;
+            startBtn.textContent = 'JUGAR DE NUEVO';
+            overlay.classList.remove('hidden');
+        }
+
+        function draw() {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            if (gameState !== 'startMenu' && player && enemies && food) {
+                ctx.fillStyle = '#ffd700';
+                ctx.fillRect(food.x * TILE_SIZE, food.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                
+                [player, ...enemies].forEach(snake => {
+                    snake.body.forEach((part, index) => {
+                        const headSize = TILE_SIZE + Math.min(8, snake.body.length / 4);
+                        if (index === 0) {
+                            ctx.fillStyle = snake.color;
+                            ctx.fillRect(part.x * TILE_SIZE - (headSize-TILE_SIZE)/2, part.y * TILE_SIZE - (headSize-TILE_SIZE)/2, headSize, headSize);
+                        } else {
+                            ctx.fillStyle = snake.color;
+                            ctx.globalAlpha = 0.7;
+                            ctx.fillRect(part.x * TILE_SIZE, part.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                            ctx.globalAlpha = 1;
+                        }
+                    });
+                });
+                playerScoreEl.textContent = `TÚ: ${player.body.length}`;
+                const biggestEnemy = Math.max(0, ...enemies.map(e => e.body.length));
+                enemyScoreEl.textContent = `ROJO MÁS GRANDE: ${biggestEnemy}`;
+            }
+        }
+        
+        function gameLoop() {
+            if(gameState === 'playing') update();
+        }
+        function renderLoop() {
+            draw();
+            requestAnimationFrame(renderLoop);
+        }
+        
+        startBtn.addEventListener('click', () => {
+            if (!gameLogicInterval) {
+                gameLogicInterval = setInterval(gameLoop, GAME_SPEED);
+            }
+            init();
+        });
+
+        renderLoop();
+    </script>
+</body>
+</html>
