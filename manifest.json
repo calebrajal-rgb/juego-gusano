@@ -1,0 +1,12 @@
+{
+  "background_color": "hsl(0, 0%, 2%)",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "Gusano",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "Gusano",
+  "start_url": "/juego-gusano/",
+  "theme_color": "rgb(0, 0, 0)",
+  "description": "Un juego divertido del gusano que come y crece."
+}
